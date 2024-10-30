@@ -38,29 +38,14 @@
 
 #elif HOW_CAN_BUS == HOW_BUS_NMEA2000
 
-	#define USE_N2K_CAN 1
-		// define before include NMEA2000_CAN.h
-		// for use with SPI and MCP2515 can bus controller
-
-	// #include <mcp_can.h>
-	// #include <NMEA2000.h>
-	// #include <NMEA2000_mcp.h>
-	#include <NMEA2000_CAN.h>
+	#include <NMEA2000_mcp.h>
 	#include <N2kMessages.h>	// for SetN2kPGN130310()
-	// #include <NMEA2000_esp32.h>
 
-	// there is no API to pass the CAN_500KBPS baudrate thru to the underlying
-	// MCP_CAN::begin() method, so I modified NMEA2000_mcp.cpp to hardwire it.
+	// forked and added API to pass the CAN_500KBPS baudrate
 
-	tNMEA2000_mcp nmea2000(CAN_CS_PIN,MCP_8MHz);
-
-	static void onNMEAOpen()
-	{
-		display(0,"onNMEAOpen() called",0);
-	}
+	tNMEA2000_mcp nmea2000(CAN_CS_PIN,MCP_8MHz,CAN_500KBPS);
 	
-	// const unsigned long transmit_messages[] = {130310L, 0};
-	const unsigned long TransmitMessages[] PROGMEM={130310L,130311L,130312L,0};
+	const unsigned long TransmitMessages[] PROGMEM={130310L,0};
 
 #endif
 
@@ -138,7 +123,7 @@ void setup()
 		#endif
 
 
-		// prh - "debugging" seems to mean "do nothing" fake it out, or whatever
+		// prh - "debugging" seems to mean "do nothing" (fake it out) or whatever
 		// so this doesn't help:
 		#if 0
 			nmea2000.SetDebugMode(tNMEA2000::dm_ClearText);
@@ -153,11 +138,6 @@ void setup()
 			nmea2000.SetForwardType(tNMEA2000::fwdt_Text);
 				// Show in clear text.
 			nmea2000.SetForwardOwnMessages(true);
-		#endif
-
-
-		#if 1
-			nmea2000.SetOnOpen(onNMEAOpen);
 		#endif
 
 		#if 1
