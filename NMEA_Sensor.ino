@@ -1,7 +1,6 @@
 //-------------------------------------------
 // NMEA_Sesnsor.cpp
 //-------------------------------------------
-// The ST2515 module only works reliably with a 10K pullup on MISO
 
 #include <myDebug.h>
 
@@ -11,7 +10,8 @@
 
 #define HOW_CAN_BUS			HOW_BUS_NMEA2000
 
-#define MSG_SEND_TIME		5000
+#define MSG_SEND_TIME		1000
+	// once per second; have had it work at 50ms (20 per second)
 #define CAN_CS_PIN			5
 
 
@@ -160,7 +160,7 @@ void loop()
 {
 	static float dir = 1;
 	static uint32_t counter;
-	static float temperatureC;
+	static float temperatureC = 20;
 	static uint32_t last_send_time;
 
 	uint32_t now = millis();
@@ -169,9 +169,9 @@ void loop()
 		last_send_time = now;
 
 		temperatureC += dir;
-		if (temperatureC > 100)
+		if (temperatureC > 199)
 			dir = -1;
-		else if (temperatureC < -100)
+		else if (temperatureC < 1)
 			dir = 1;
 
 		display(0,"Sending(%d): %0.3fC",++counter,temperatureC);
@@ -186,6 +186,7 @@ void loop()
 			#if 1
 
 				// SetN2kOutsideEnvironmentalParameters() is an alias for SetN2kPGN130310
+				// Note tht degrees are Kelvin and there is no such thing as a negative degree Kelvin
 
 				tN2kMsg N2kMsg; 	// it's a class, not a structure!
 				double tempDouble = temperatureC;
