@@ -1,6 +1,7 @@
 //-------------------------------------------
-// NMEA_Sesnsor.cpp
+// NMEA_Sensor.cpp
 //-------------------------------------------
+// Note that the monitor needs DEBUG_RXANY compile flag.
 
 #include <myDebug.h>
 
@@ -39,13 +40,13 @@
 #elif HOW_CAN_BUS == HOW_BUS_NMEA2000
 
 	#include <NMEA2000_mcp.h>
-	#include <N2kMessages.h>	// for SetN2kPGN130310()
+	#include <N2kMessages.h>
 
 	// forked and added API to pass the CAN_500KBPS baudrate
 
 	tNMEA2000_mcp nmea2000(CAN_CS_PIN,MCP_8MHz,CAN_500KBPS);
 	
-	const unsigned long TransmitMessages[] PROGMEM={130310L,0};
+	const unsigned long TransmitMessages[] = {130316L,0};
 
 #endif
 
@@ -60,8 +61,7 @@ void setup()
 	Serial.begin(921600);
 	delay(2000);
 	display(0,"NMEA_Sensor.ino setup(%d) started",HOW_CAN_BUS);
-	Serial.println("blah");
-
+	Serial.println("WTF");
 
 	#if HOW_CAN_BUS == HOW_BUS_MPC2515
 
@@ -81,8 +81,6 @@ void setup()
 		}
 
 	#elif HOW_CAN_BUS == HOW_BUS_NMEA2000
-
-		display(0,"using nme2000 setup from TemperatureMonitor example",0);
 
 		#if 0
 			nmea2000.SetN2kCANMsgBufSize(150);
@@ -106,30 +104,14 @@ void setup()
 				);
 		#endif
 
-		#if 0
-			nmea2000.ExtendTransmitMessages(TransmitMessages);
-		#endif
+		// set its initial bus address to 22
 
-
-		#if 1
-			// set its initial bus address to 22
-
-			nmea2000.SetMode(tNMEA2000::N2km_SendOnly,	22);
-				// N2km_NodeOnly
-				// N2km_ListenAndNode
-				// N2km_ListenAndSend
-				// N2km_ListenOnly
-				// N2km_SendOnly
-		#endif
-
-
-		// prh - "debugging" seems to mean "do nothing" (fake it out) or whatever
-		// so this doesn't help:
-		#if 0
-			nmea2000.SetDebugMode(tNMEA2000::dm_ClearText);
-				// dm_Actisense);
-		#endif
-
+		nmea2000.SetMode(tNMEA2000::N2km_SendOnly,	22);
+			// N2km_NodeOnly
+			// N2km_ListenAndNode
+			// N2km_ListenAndSend
+			// N2km_ListenOnly
+			// N2km_SendOnly
 
 		#if 1
 			nmea2000.EnableForward(false); // Disable all msg forwarding to USB (=Serial)
@@ -140,10 +122,15 @@ void setup()
 			nmea2000.SetForwardOwnMessages(true);
 		#endif
 
-		#if 1
-			if (!nmea2000.Open())
-				my_error("nmea2000.open() failed",0);
+		#if 0
+			// I could not get this to eliminate need for DEBUG_RXANY
+			// compiile flag in the Monitor
+
+			nmea2000.ExtendTransmitMessages(TransmitMessages);
 		#endif
+
+		if (!nmea2000.Open())
+			my_error("nmea2000.Open() failed",0);
 
 	#endif	// HOW_CAN_BUS == HOW_BUS_NMEA2000
 
@@ -169,54 +156,40 @@ void loop()
 		last_send_time = now;
 
 		temperatureC += dir;
-		if (temperatureC > 199)
+		if (temperatureC > 100)
 			dir = -1;
-		else if (temperatureC < 1)
+		else if (temperatureC < -100)
 			dir = 1;
 
 		display(0,"Sending(%d): %0.3fC",++counter,temperatureC);
 
 		#if HOW_CAN_BUS == HOW_BUS_NMEA2000
 
-			// display(0,"PGN(%d)=0x%08x",130310L,130310L);
-			// PGN(130310L)	=	0x0001fd06		Environmental Temperature
+			// display(0,"PGN(%d)=0x%08x",130316L,130316L);
+			// PGN(130316L)	=	0x0001fd0c		TemperatureExt
 			// PGN(60928L)	=	0x0000ee00		Address Claim
 			// PGN(126993L)	=	0x0001f011		Heartbeet
 
-			#if 1
+			// SetN2kTemperatureExt is an alias for SetN2kPGN130316
+			// Note tht degrees are Kelvin
 
-				// SetN2kOutsideEnvironmentalParameters() is an alias for SetN2kPGN130310
-				// Note tht degrees are Kelvin and there is no such thing as a negative degree Kelvin
+			tN2kMsg N2kMsg; 	// it's a class, not a structure!
+			double tempDouble = temperatureC;
 
-				tN2kMsg N2kMsg; 	// it's a class, not a structure!
-				double tempDouble = temperatureC;
-				// memset(N2kMsg.Data,0,sizeof(N2kMsg.Data));
-					// zero out the data for display_bytes
-				SetN2kPGN130310(N2kMsg, 1, tempDouble, N2kDoubleNA, N2kDoubleNA);
-					// SetN2kOutsideEnvironmentalParameters(N2kMsg, 1, tempDouble, N2kDoubleNA, N2kDoubleNA);
-				// display_bytes(0,"N2kMsg.Data",N2kMsg.Data,sizeof(N2kMsg.Data));
-				nmea2000.SendMsg(N2kMsg);
-			
-			#elif 0
+			SetN2kPGN130316(
+				N2kMsg,
+				255,								// unsigned char SID; 255 indicates "unused"
+				93,									// unsigned char TempInstance "should be unique per device-PGN"
+				N2kts_RefridgerationTemperature,	// tN2kTempSource enumerated type
+				CToKelvin(tempDouble),
+				N2kDoubleNA							// double SetTemperature
+			);
 
-				// Here I try to build the message my self with code
-				// copied from SetN2kPGN130310() method as called in "barometer" example program
-				// SetN2kPGN130310(N2kMsg, 0, N2kDoubleNA, CToKelvin(Temperature), BarometricPressure)
+			// SIDS have the semantic meaning of tying a number of messages together to
+			// 		one point in time.  If used, they should start at 0, and recyle after 252
+			// 		253 and 254 are reserved.
 
-				#define SID		0
-				double tempDouble = temperatureC;
-
-				tN2kMsg N2kMsg;
-				N2kMsg.SetPGN(130310L);
-				N2kMsg.Priority=5;
-				N2kMsg.AddByte(SID);
-				N2kMsg.Add2ByteUDouble(tempDouble,0.01);
-				N2kMsg.Add2ByteUDouble(N2kDoubleNA,0.01);
-				N2kMsg.Add2ByteUDouble(N2kDoubleNA,100);
-				N2kMsg.AddByte(0xff);  // reserved
-				NMEA2000.SendMsg(N2kMsg);
-
-			#endif 	// alternative approaches
+			nmea2000.SendMsg(N2kMsg);
 
 		#elif HOW_CAN_BUS == HOW_BUS_CANBUS
 
