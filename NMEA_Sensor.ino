@@ -62,12 +62,29 @@
 
 	#include <NMEA2000_mcp.h>
 	#include <N2kMessages.h>
+	#define BROADCAST_NMEA200_INFO	0
 
 	// forked and added API to pass the CAN_500KBPS baudrate
 
 	tNMEA2000_mcp nmea2000(CAN_CS_PIN,MCP_8MHz,CAN_500KBPS);
 	
-	const unsigned long TransmitMessages[] = {130316L,0};
+	#define PGN_REQUEST					59904L
+	#define PGN_ADDRESS_CLAIM			60928L
+	#define PGN_PGN_LIST				126464L
+	#define PGN_HEARTBEAT				126993L
+	#define PGN_PRODUCT_INFO			126996L
+	#define PGN_DEVICE_CONFIG			126998L
+	#define PGN_TEMPERATURE    			130316L
+
+	const unsigned long AllMessages[] = {
+		PGN_REQUEST,
+		PGN_ADDRESS_CLAIM,
+		PGN_PGN_LIST,
+		PGN_HEARTBEAT,
+		PGN_PRODUCT_INFO,
+		PGN_DEVICE_CONFIG,
+		PGN_TEMPERATURE,
+		0};
 
 #endif
 
@@ -131,41 +148,32 @@ void setup()
 			nmea2000.SetN2kCANMsgBufSize(150);
 			nmea2000.SetN2kCANSendFrameBufSize(150);
 			nmea2000.SetN2kCANReceiveFrameBufSize(150);
-		#endif
-
-		// the product information doesnt seem correct
-		// in actisense
-		//     LEN are both 1 (50ma)
-		//	   ModelID is "Arduino N2K->PC"
-		//	   Softare ID is "1.0.0.0"
-		//	   Hardware ID is "1.0.0"
-		// perhaps it is the INSTANCES or the
-		// device number ....
+		#endif.
 		
 		#if 1
+
 			nmea2000.SetProductInformation(
-				"23700002", 				// Manufacturer's Model serial code
-				100, 						// Manufacturer's product code
-				"Simple Temp Sensor",  		// Manufacturer's Model ID
-				"1.0", 						// Manufacturer's Software version code
-				"1.0", 						// Manufacturer's Model version
-				2,							// LoadEquivalency 2=100ma; Default=1. x * 50 mA
-				2101,						// N2kVersion           Default=2101
-				1,							// CertificationLevel   Default=1
-				12							// iDev    index of the device on \ref Devices
+				"prh_model_110",            // Manufacturer's Model serial code
+				110,                        // Manufacturer's uint8_t product code
+				"ESP32 NMEA Sensor",        // Manufacturer's Model ID
+				"prh_sw_110.0",             // Manufacturer's Software version code
+				"prh_mv_110.0",             // Manufacturer's uint8_t Model version
+				1,                          // LoadEquivalency uint8_t 3=150ma; Default=1. x * 50 mA
+				2101,                       // N2kVersion Default=2101
+				1,                          // CertificationLevel Default=1
+				0                           // iDev (int) index of the device on \ref Devices
 				);
 			nmea2000.SetConfigurationInformation(
-				"prhSystem",			// ManufacturerInformation
-                "Install Info1",		// InstallationDescription1
-                "Install Info2" 		// InstallationDescription2
+				"prhSystems",           	// ManufacturerInformation
+				"SensorInstall1",       	// InstallationDescription1
+				"SensorInstall2"       		// InstallationDescription2
 				);
 			nmea2000.SetDeviceInformation(
-				112233, // Unique number. Use e.g. Serial number.
-				130, 	// Device function=Temperature. See codes on https://web.archive.org/web/20190531120557/https://www.nmea.org/Assets/20120726%20nmea%202000%20class%20&%20function%20codes%20v%202.00.pdf
-				75, 	// Device class=Sensor Communication Interface. See codes on https://web.archive.org/web/20190531120557/https://www.nmea.org/Assets/20120726%20nmea%202000%20class%20&%20function%20codes%20v%202.00.pdf
-				2040 	// Just choosen free from code list on https://web.archive.org/web/20190529161431/http://www.nmea.org/Assets/20121020%20nmea%202000%20registration%20list.pdf
+				1230110, // uint32_t Unique number. Use e.g. Serial number.
+				130,     // uint8_t  Device function=Temperature.. See codes on https://web.archive.org/web/20190531120557/https://www.nmea.org/Assets/20120726%20nmea%202000%20class%20&%20function%20codes%20v%202.00.pdf
+				75, 	 // Device class=Sensor Communication Interface. See codes on https://web.archive.org/web/20190531120557/https://www.nmea.org/Assets/20120726%20nmea%202000%20class%20&%20function%20codes%20v%202.00.pdf
+				2046     // uint16_t choosen free from code list on https://web.archive.org/web/20190529161431/http://www.nmea.org/Assets/20121020%20nmea%202000%20registration%20list.pdf
 				);
-
 		#endif
 
 		// set its initial bus address to 22
@@ -189,8 +197,8 @@ void setup()
 		#if 1
 			// I could not get this to eliminate need for DEBUG_RXANY
 			// compiile flag in the Monitor
-
-			nmea2000.ExtendTransmitMessages(TransmitMessages);
+			nmea2000.ExtendReceiveMessages(AllMessages);
+			nmea2000.ExtendTransmitMessages(AllMessages);
 		#endif
 
 		#if	1
@@ -231,39 +239,41 @@ void loop()
 	if (now - last_send_time > MSG_SEND_TIME)
 	{
 		last_send_time = now;
-		nmea2000.ParseMessages(); // Keep parsing messages
 
-		// at this time I have not figured out the actisense reader, and how to
-		// get the whole system to work so that when it asks for device configuration(s)
-		// and stuff, we send it stuff.  However, this code explicitly sends some info
-		// at boot, and I have seen the results get to the reader!
+		#if BROADCAST_NMEA200_INFO
 
-		if (info_sent < NUM_INFOS)
-		{
-			switch (info_sent)
+			// at this time I have not figured out the actisense reader, and how to
+			// get the whole system to work so that when it asks for device configuration(s)
+			// and stuff, we send it stuff.  However, this code explicitly sends some info
+			// at boot, and I have seen the results get to the reader!
+
+			if (info_sent < NUM_INFOS)
 			{
-				case 0:
-					nmea2000.SendProductInformation();
-						// 255,	// unsigned char Destination,
-						// 0,		// only device
-						// false);	// bool UseTP);
-					break;
-				case 1:
-					nmea2000.SendConfigurationInformation(255,0,false);
-					break;
-				case 2:
-					nmea2000.SendTxPGNList(255,0,false);
-					break;
-				case 3:
-					nmea2000.SendRxPGNList(255,0,false);	// empty right now for the sensor
-					break;
+				nmea2000.ParseMessages(); // Keep parsing messages
+				switch (info_sent)
+				{
+					case 0:
+						nmea2000.SendProductInformation();
+							// 255,	// unsigned char Destination,
+							// 0,		// only device
+							// false);	// bool UseTP);
+						break;
+					case 1:
+						nmea2000.SendConfigurationInformation(255,0,false);
+						break;
+					case 2:
+						nmea2000.SendTxPGNList(255,0,false);
+						break;
+					case 3:
+						nmea2000.SendRxPGNList(255,0,false);	// empty right now for the sensor
+						break;
+				}
+
+				info_sent++;
+				nmea2000.ParseMessages(); // Keep parsing messages
+				return;
 			}
-
-			info_sent++;
-			nmea2000.ParseMessages(); // Keep parsing messages
-			return;
-		}
-
+		#endif	// BROADCAST_NMEA200_INFO
 
 		temperatureC += dir;
 		if (temperatureC > 100)
