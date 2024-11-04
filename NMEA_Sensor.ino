@@ -6,7 +6,7 @@
 #include <myDebug.h>
 #include <SPI.h>
 
-#define USE_HSPI		1
+#define USE_HSPI		0
 	// use ESP32 alternative HSPI for mcp2515 so that it
 	// isn't mucked with by the st7789 display
 	// only currently supported with HOW_BUS_NMEA2000
