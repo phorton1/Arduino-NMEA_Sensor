@@ -2,6 +2,18 @@
 // NMEA_Sensor.cpp
 //-------------------------------------------
 // Note that the monitor needs DEBUG_RXANY compile flag.
+//
+// Pins to	MCP2515 Canbus module	pin 1 == VBUS
+//
+//		module			ESP32
+//
+//		(1) VCC 	 	(1)  VBUS			red		jumpered by orange to unused breadboard "pin 0"
+// 		(2) GND			(29) GND			brown	next to 3V3
+//		(5) (MO)SI		(16) GPIO23 (MOSI)  green
+//		(4) (MI)SO		(21) GPIO19 (MISO)	yellow
+//		(6) SCK			(22) GPIO18 (SCK)	blue
+// 		(3) CS			(23) GPIO5	(CS)	orange
+//		(7) INT			nc
 
 #include <myDebug.h>
 #include <NMEA2000_mcp.h>
