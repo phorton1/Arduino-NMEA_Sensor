@@ -7,13 +7,13 @@
 //
 //		module			ESP32
 //
-//		(1) VCC 	 	(1)  VBUS			red		jumpered by orange to unused breadboard "pin 0"
-// 		(2) GND			(29) GND			brown	next to 3V3
-//		(5) (MO)SI		(16) GPIO23 (MOSI)  green
-//		(4) (MI)SO		(21) GPIO19 (MISO)	yellow
-//		(6) SCK			(22) GPIO18 (SCK)	blue
-// 		(3) CS			(23) GPIO5	(CS)	orange
-//		(7) INT			nc
+//		(7) INT			GPIO22			orange
+//		(6) SCK			GPIO18 (SCK)	white
+//		(5) (MO)SI		GPIO23 (MOSI)  	yellow
+//		(4) (MI)SO		GPIO19 (MISO)	green
+// 		(3) CS			GPIO5	(CS)	blue
+// 		(2) GND			GND				black
+//		(1) VCC 	 	VBUS			red
 
 #include <myDebug.h>
 #include <NMEA2000_mcp.h>
@@ -23,20 +23,22 @@
 #define dbg_sensor			0
 #define dbg_msgs			0
 
+
 #define SHOW_BUS_MESSAGES	1
 
-
-#define INSTRUMENT_TYPE			1
+#define INSTRUMENT_TYPE		1
 	// 0 = temperature
 	// 1 = heading, speed, depth
 
 
 
+#define CAN_CS_PIN			5
+#define CAN_INT_PIN			22		// 0xff for 'none'
+
 #define USE_HSPI			0
 	// use ESP32 alternative HSPI for mcp2515 so that it
 	// isn't mucked with by the st7789 display
 	// only currently supported with HOW_BUS_NMEA2000
-#define CAN_CS_PIN			5
 
 #define DEFAULT_SENSOR_INTERVAL		500
 	// OK, so explicit messages sent appear to mess with
@@ -48,7 +50,6 @@
 	// Used to be 2000ms (2 seconds)
 	// OpenSkipper needs heading/speed/depth to be transmitted
 	// fairly often or the devices go off line, so I use 500ms
-
 
 #define BROADCAST_NMEA200_INFO	0
 #define BROADCAST_INTERVAL		300
@@ -71,7 +72,7 @@ uint32_t sensor_interval = DEFAULT_SENSOR_INTERVAL;
 // NMEA2000 Stuff
 //-----------------------------------
 
-tNMEA2000_mcp nmea2000(CAN_CS_PIN,MCP_8MHz);
+tNMEA2000_mcp nmea2000(CAN_CS_PIN,MCP_8MHz,CAN_INT_PIN);
 
 #define PGN_REQUEST					59904L
 #define PGN_ADDRESS_CLAIM			60928L
