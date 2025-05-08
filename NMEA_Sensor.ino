@@ -1,7 +1,7 @@
 //-------------------------------------------
 // NMEA_Sensor.cpp
 //-------------------------------------------
-// Note that the monitor needs DEBUG_RXANY compile flag.
+// Note that the MCP2515 monitor needs DEBUG_RXANY compile flag.
 //
 // Pins to	MCP2515 Canbus module	pin 1 == VBUS
 //
@@ -24,13 +24,16 @@
 #define dbg_msgs			0
 
 
-#define SHOW_BUS_MESSAGES	1
+// Program Options
 
-#define INSTRUMENT_TYPE		1
-	// 0 = temperature
-	// 1 = heading, speed, depth
+#define SHOW_BUS_MESSAGES		1
+#define BROADCAST_NMEA200_INFO	0
+#define BROADCAST_INTERVAL		300
 
 
+//-------------------------------------------
+// NMEA2000_mcp configuration
+//-------------------------------------------
 
 #define CAN_CS_PIN			5
 #define CAN_INT_PIN			22		// 0xff for 'none'
@@ -40,22 +43,6 @@
 	// isn't mucked with by the st7789 display
 	// only currently supported with HOW_BUS_NMEA2000
 
-#define DEFAULT_SENSOR_INTERVAL		500
-	// OK, so explicit messages sent appear to mess with
-	// the reconstruction of multi-packet fastPacket message
-	// if they are sent in the middle of one.
-	// At 500 ms, this device is not enumeratied by Monitor device list
-	// At 200 ms it is.
-	// have had it work at 50ms (20 per second)
-	// Used to be 2000ms (2 seconds)
-	// OpenSkipper needs heading/speed/depth to be transmitted
-	// fairly often or the devices go off line, so I use 500ms
-
-#define BROADCAST_NMEA200_INFO	0
-#define BROADCAST_INTERVAL		300
-
-
-
 #if USE_HSPI
 	SPIClass *hspi;
 		// MOSI=13
@@ -64,15 +51,12 @@
 		// default CS = 15
 #endif
 
-
-uint32_t sensor_interval = DEFAULT_SENSOR_INTERVAL;
-
-
-//-----------------------------------
-// NMEA2000 Stuff
-//-----------------------------------
-
 tNMEA2000_mcp nmea2000(CAN_CS_PIN,MCP_8MHz,CAN_INT_PIN);
+
+
+//----------------------------------------------
+// PGNs known by this program
+//----------------------------------------------
 
 #define PGN_REQUEST					59904L
 #define PGN_ADDRESS_CLAIM			60928L
@@ -80,27 +64,15 @@ tNMEA2000_mcp nmea2000(CAN_CS_PIN,MCP_8MHz,CAN_INT_PIN);
 #define PGN_HEARTBEAT				126993L
 #define PGN_PRODUCT_INFO			126996L
 #define PGN_DEVICE_CONFIG			126998L
-#define PGN_TEMPERATURE    			130316L
+
+
 #define PGN_HEADING					127250L
 #define PGN_SPEED					128259L
 #define PGN_DEPTH					128267L
+#define PGN_POSITION				129025L
+#define PGN_TEMPERATURE    			130316L
 
-/*
-- **127250:Vessel Heading** - in **PGN** Explorer as identifier **Heading**
-  and the **Parameter** Explorer also as identifier **Heading**.
-- **128250:Speed** - specifically the 1st param, the Speed Over Water
-  which is represented in the OpenSkipper **PGN** Explorer as the *identifier*
-  **Speed Water Referenced** which gets turned into the OpenSkipper
-  **Parameter** explorer as **Boat_kts** via *hook[0]*
-- **128267:Water Depth** as PGN Explorer **Depth** (under keel) and
-  **Parameter** **Depth**
-*/
-
-// I now believe that this is over kill and that
-// this list should only contain non-system messages
-// that the sensor sends
-
-const unsigned long AllMessages[] = {
+const unsigned long TransmitMessages[] = {
 #if 0
 	PGN_REQUEST,
 	PGN_ADDRESS_CLAIM,
@@ -109,25 +81,51 @@ const unsigned long AllMessages[] = {
 	PGN_PRODUCT_INFO,
 	PGN_DEVICE_CONFIG,
 #endif
-#if INSTRUMENT_TYPE==1
 	PGN_HEADING,
 	PGN_SPEED,
 	PGN_DEPTH,
-#else
+	PGN_POSITION,
 	PGN_TEMPERATURE,
-#endif
-	0};
+	0
+};
 
+
+//-----------------------------------
+// Program Configuration
+//-----------------------------------
+
+uint32_t sensor_interval 	= 0;			// no message sent until i<cr> or iNNN
+	// a lone 'i' sends the sensors
+	// iNNN sets an auto send interval
+
+// any of the following commands also SEND the instrument
+
+static double heading 		= 180;			// set by hNNN or hr for random (0..359)  	default = random
+static double speed 		= 0;			// set by sNN  or sr for random (0..20)		default = 0
+static double depth 		= 17;			// set by dNNN or dr for random (10-100)	default = random
+static double latitude 		= 9.323584;		// fixed at this time
+static double longitude 	= -82.237200;	// fixed at this time
+static double temperatureF 	= 80;			// set by tNN or tr for random (0..110)		default = random
+
+static bool random_heading 	= true;
+static bool random_speed 	= false;
+static bool random_depth 	= true;
+static bool random_temp 	= true;
+
+
+//-----------------------------------------------
+// implementation
+//-----------------------------------------------
 
 static String usageMessage()
 {
 	String rslt = "Usage:\r\n";
 	rslt += "   ? = Show this help\r\n";
-	rslt += "   h = send Heading\r\n";
-	rslt += "   s = send Speed\r\n";
-	rslt += "   d = send Depth\r\n";
-	rslt += "   t = send Temperature\r\n";
-	rslt += "   iNNN<cr> = set sensor_interval cur=";
+	rslt += "   h,hr,hNNN = send Heading\r\n";
+	rslt += "   s,sr,sNN = send Speed\r\n";
+	rslt += "   d,dr,dNN = send Depth\r\n";
+	rslt += "   t,tr,tNNN = send Temperature\r\n";
+	rslt += "   i,iNNN = set sensor_interval cur=";
 	rslt += String(sensor_interval);
 	rslt += "\r\n";
 	return rslt;
@@ -240,7 +238,7 @@ void setup()
 		// I now believe that I should only send the messages
 		// the sensor transmits here ...
 
-		nmea2000.ExtendTransmitMessages(AllMessages);
+		nmea2000.ExtendTransmitMessages(TransmitMessages);
 			// nmea2000.ExtendReceiveMessages(AllMessages);
 	#endif
 
@@ -269,65 +267,81 @@ static void sendSensor(uint32_t PGN)
 {
 	static uint32_t counter;
 
+	// note that these blocks each check the PGN
+	// and then send that kind of PGN even though
+	// the library does not have a polymorphic API
+
 	tN2kMsg msg; 	// it's a class, not a structure!
-	if (PGN == PGN_HEADING)
+
+	if (PGN == PGN_POSITION)
 	{
-		static double inc = 5.1;
-		static double heading = 180;
-		heading += inc;
-		if (heading >= 270) inc = -4.8;
-		if (heading <= 90) inc = 5.3;
-		display(dbg_sensor,"Send heading(%d): %0.3f",++counter,heading);
+		display(dbg_sensor,"Send(%d) lat(%0.6f) lon(%0.6f)",++counter,latitude,longitude);
+		SetN2kPGN129025(msg, latitude, longitude);
+			// PGN_POSITION - lat lon in double degrees
+	}
+	else if (PGN == PGN_HEADING)
+	{
+		if (random_heading)
+		{
+			static double inc = 5;
+			heading += inc;
+			if (heading >= 255) inc = -5;
+			if (heading <= 5) inc = 5;
+		}
+		display(dbg_sensor,"Send(%d) heading: %0.3f",++counter,heading);
 		SetN2kPGN127250(msg, 255, DegToRad(heading), 0.0 /*Deviation*/, 0.0 /*Variation*/, N2khr_true /* tN2kHeadingReference(0) */);
-			// heading is in radians
+			// PGN_HEADING - heading is in radians
 	}
 	else if (PGN == PGN_SPEED)
 	{
-		static double inc = 0.2;
-		static double speed = 5;
-		speed += inc;
-		if (speed >= 8) inc = -0.2;
-		if (speed <= 2) inc = 0.2;
-		display(dbg_sensor,"Send speed(%d): %0.3f",++counter,speed);
+		if (random_speed)
+		{
+			static double inc = 0.2;
+			speed += inc;
+			if (speed >= 8) inc = -0.2;
+			if (speed <= 2) inc = 0.2;
+		}
+		display(dbg_sensor,"Send(%d) speed: %0.3f",++counter,speed);
 		SetN2kPGN128259(msg, 255, KnotsToms(speed));
-			// speed is meters/sec
+			// PGN_SPEED - speed is meters/sec
 	}
 	else if (PGN == PGN_DEPTH)
 	{
-		static double inc = 3.7;
-		static double depth = 50;
-		depth += inc;
-		if (depth > 100) inc = -2.2;
-		if (depth < 30)  inc = 3.9;
-		display(dbg_sensor,"Send depth(%d): %0.3f",++counter,depth);
+		if (random_depth)
+		{
+			static double inc = 1;
+			depth += inc;
+			if (depth > 99) inc = -1;
+			if (depth < 11)  inc = 1;
+		}
+		display(dbg_sensor,"Send(%d) depth: %0.3f",++counter,depth);
 		SetN2kPGN128267(msg, 255, depth, 2.0);
-			// depth is in meters
-			// 2.0 meter offset of keel
+			// PGN_DEPTH - depth is in meters
+			// with a 2.0 meter offset of keel
 	}
 	else if (PGN == PGN_TEMPERATURE)
 	{
 		// Note tht degrees are Kelvin
 
-		static float dir = 1;
-		static float temperatureC = 20;
-
-		temperatureC += dir;
-		if (temperatureC > 100)
-			dir = -1;
-		else if (temperatureC < -100)
-			dir = 1;
-		display(dbg_sensor,"Sending(%d): %0.3fC",++counter,temperatureC);
-
-		double tempDouble = temperatureC;
+		if (random_temp)
+		{
+			static double dir = 1;
+			temperatureF += dir;
+			if (temperatureF > 109)
+				dir = -1;
+			else if (temperatureF < 1)
+				dir = 1;
+		}
+		display(dbg_sensor,"Send(%d) temoerature: %0.3fF",++counter,temperatureF);
 		tN2kTempSource temp_kind = N2kts_MainCabinTemperature;	// 4
 			// tN2kTempSource temp_kind = N2kts_RefridgerationTemperature;	// 7
 
-		SetN2kPGN130316(
+		SetN2kPGN130316(						// PGN_TEMPERATURE
 			msg,
 			255,								// unsigned char SID; 255 indicates "unused"
 			93,									// unsigned char TempInstance "should be unique per device-PGN"
 			temp_kind,
-			CToKelvin(tempDouble),
+			FToKelvin(temperatureF),
 			N2kDoubleNA							// double SetTemperature
 		);
 	}
@@ -342,9 +356,37 @@ static void sendSensor(uint32_t PGN)
 
 
 
+static void sendSensors()
+{
+	sendSensor(PGN_HEADING);
+	sendSensor(PGN_SPEED);
+	sendSensor(PGN_DEPTH);
+	sendSensor(PGN_TEMPERATURE);
+}
+
+
+
 //-----------------------------
 // handleSerial()
 //-----------------------------
+
+
+static void handleCommand(uint32_t PGN,const char *name,char *linebuf,bool *random, double *value)
+{
+	if (linebuf[0] == 'r')
+	{
+		*random = true;
+		warning(0,"Setting random %s",name);
+	}
+	else if (linebuf[0] != 0)
+	{
+		*random = false;
+		*value = (double) atol(linebuf);
+		warning(0,"Setting %s=%0.1f",name,*value);
+	}
+	sendSensor(PGN);
+}
+
 
 
 static void handleSerial()
@@ -365,16 +407,31 @@ static void handleSerial()
 			{
 				linebuf[line_ptr++] = 0;
 
-				if (line_command = 'i')
+				if (line_command == 'i')
 				{
-					sensor_interval = atol(linebuf);
-					warning(0,"Setting Sensor Interval=%d",sensor_interval);
+					if (linebuf[0] == 0)	// i by itself
+					{
+						sensor_interval = 0;
+						sendSensors();
+					}
+					else
+					{
+						sensor_interval = atol(linebuf);
+						warning(0,"Setting Sensor Interval=%d",sensor_interval);
+					}
 				}
+				else if (line_command == 'h')
+					handleCommand(PGN_HEADING,"heading",linebuf,&random_heading,&heading);
+				else if (line_command == 's')
+					handleCommand(PGN_SPEED,"speed",linebuf,&random_speed,&speed);
+				else if (line_command == 'd')
+					handleCommand(PGN_DEPTH,"depth",linebuf,&random_depth,&depth);
+				else if (line_command == 't')
+					handleCommand(PGN_TEMPERATURE,"temperature",linebuf,&random_temp,&temperatureF);
 
 				line_command = 0;
 				line_ptr = 0;
 				in_line = 0;
-
 			}
 			else if (byte != 0x0D)
 			{
@@ -383,19 +440,20 @@ static void handleSerial()
 		}
 		else if (byte == '?')
 			Serial.print(usageMessage().c_str());
-		else if (byte == 'h')
-			sendSensor(PGN_HEADING);
-		else if (byte == 's')
-			sendSensor(PGN_SPEED);
-		else if (byte == 't')
-			sendSensor(PGN_DEPTH);
-		else if (byte == 't')
-			sendSensor(PGN_TEMPERATURE);
-		else if (byte == 'i')
+		else if (
+			byte == 'i' ||
+			byte == 'h' ||
+			byte == 's' ||
+			byte == 'd' ||
+			byte == 't')
 		{
 			in_line = 1;
 			line_ptr = 0;
 			line_command = byte;
+		}
+		else if (byte == 'p')
+		{
+			sendSensor(PGN_POSITION);
 		}
 		else
 		{
@@ -464,27 +522,8 @@ void loop()
 	if (sensor_interval && now - sensor_time > sensor_interval)
 	{
 		sensor_time = now;
-
-		tN2kMsg msg; 	// it's a class, not a structure!
-
-		#if INSTRUMENT_TYPE==1
-
-			static int what_send;		// 0 = heading, 1=speed, 2=depth
-			what_send = (what_send + 1) % 3;
-			if (what_send == 0)
-				sendSensor(PGN_HEADING);
-			else if (what_send == 1)
-				sendSensor(PGN_SPEED);
-			else if (what_send == 2)
-				sendSensor(PGN_DEPTH);
-
-		#else
-
-			sendSensor(PGN_TEMPERATURE);
-
-		#endif
-
-	}	// time to send sensor data
+		sendSensors();
+	}
 
 	//----------------------------
 	// general loop handling
