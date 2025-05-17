@@ -304,7 +304,8 @@
 //-------------------------------------------
 
 #define CAN_CS_PIN			5
-#define CAN_INT_PIN			22		// 0xff for 'none'
+#define CAN_INT_PIN			0xff	// 22		// 0xff for 'none'
+	// trying to turn off interrupt to solve WDT problem
 
 #define USE_HSPI			0
 	// use ESP32 alternative HSPI for mcp2515 so that it
@@ -472,8 +473,14 @@ static void onNMEA2000Message(const tN2kMsg &msg)
 // setup
 //------------------------
 
+
+// #include <soc/rtc_wdt.h>
+
 void setup()
 {
+	// STILL getting spurious reboots from wdt
+	// rtc_wdt_disable();
+
 	Serial.begin(921600);
 	delay(2000);
 	display(dbg_sensor,"NMEA_Sensor.ino setup() started",0);
@@ -734,7 +741,6 @@ static void sendSensor(uint32_t PGN, unsigned char instance=0)
 		SetN2kPGN127505(msg, instance, fluid_type, level, capacity);
 	}
 	
-
 	// SIDS have the semantic meaning of tying a number of messages together to
 	// 		one point in time.  If used, they should start at 0, and recyle after 252
 	// 		253 and 254 are reserved.
