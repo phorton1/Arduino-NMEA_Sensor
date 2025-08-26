@@ -409,7 +409,7 @@ static bool random_rpms		= true;
 
 static String usageMessage()
 {
-	String rslt = "Usage:\r\n";
+	String rslt = "NMEA Sensor Usage:\r\n";
 	rslt += "   ? = Show this help\r\n";
 	rslt += "   h,hr,hNNN = send Heading\r\n";
 	rslt += "   s,sr,sNN = send Speed\r\n";
@@ -833,6 +833,26 @@ static void handleSerial()
 		uint8_t byte = Serial.read();
 		if (in_line)
 		{
+			if (line_command == 'x')
+			{
+				if (byte == '!')
+				{
+					warning(0,"REBOOTING !!!",0);
+					vTaskDelay(500 / portTICK_PERIOD_MS);
+					ESP.restart();
+					while (1) {}
+				}
+				else
+				{
+
+					line_command = 0;
+					line_ptr = 0;
+					in_line = 0;
+					my_error("unexpected char after x==reboot",0);
+					return;
+				}
+			}
+
 			if (byte == 0x0A || line_ptr >= MAXLINE)
 			{
 				linebuf[line_ptr++] = 0;
@@ -860,18 +880,6 @@ static void handleSerial()
 					handleCommand(PGN_TEMPERATURE,"temperature",linebuf,&random_temp,&temperatureF);
 				else if (line_command == 'r')
 					handleCommand(PGN_ENGINE_RAPID,"rpms",linebuf,&random_rpms,&rpms);
-				else if (line_command == 'x')
-				{
-					if (linebuf[0] == '!')
-					{
-						warning(0,"REBOOTING !!!",0);
-						vTaskDelay(500 / portTICK_PERIOD_MS);
-						ESP.restart();
-						while (1) {}
-					}
-					else
-						my_error("unexpected char after x==reboot",0);
-				}
 
 				line_command = 0;
 				line_ptr = 0;
@@ -896,6 +904,8 @@ static void handleSerial()
 			in_line = 1;
 			line_ptr = 0;
 			line_command = byte;
+			if (byte == 'x')
+				warning(0,"PRESS '!' to Confirm Reboot!!!",0);
 		}
 		else if (byte == 'p')
 		{
